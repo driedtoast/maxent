@@ -45,9 +45,26 @@ public class ComparableEvent implements Comparable {
         this.values = values; //needs to be sorted like pids
         predIndexes = pids;
     }
+
     
     public ComparableEvent(int oc, int[] pids) {
       this(oc,pids,null);
+    }
+
+    public int[] getPredicateIndexes(){
+      return predIndexes; 
+    }
+
+    public int getOutcome(){
+      return outcome;
+    }
+
+    public int getSeen(){
+      return seen;
+    }
+
+    public float[] getValues(){
+      return values;
     }
 
     public int compareTo(Object o) {

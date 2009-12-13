@@ -24,7 +24,7 @@ import opennlp.model.MutableContext;
 import opennlp.model.OnePassDataIndexer;
 import opennlp.model.Prior;
 import opennlp.model.UniformPrior;
-
+import opennlp.model.ComparableEvent;
 
 /**
  * An implementation of Generalized Iterative Scaling.  The reference paper
@@ -77,18 +77,8 @@ class GISTrainer {
   /** Number of outcomes. */
   private int numOutcomes; 
 
-  /** Records the array of predicates seen in each event. */
-  private int[][] contexts;
-  
-  /** The value associated with each context. If null then context values are assumes to be 1. */
-  private float[][] values;
-  
-  /** List of outcomes for each event i, in context[i]. */
-  private int[] outcomeList;
-
-  /** Records the num of times an event has been seen for each event i, in context[i]. */
-  private int[] numTimesEventsSeen;
-  
+  private Iterable<ComparableEvent> events; 
+ 
   /** The number of times a predicate occured in the training data. */
   private int[] predicateCounts;
   
@@ -215,27 +205,24 @@ class GISTrainer {
   public GISModel trainModel(int iterations, DataIndexer di, Prior modelPrior, int cutoff) {
     /************** Incorporate all of the needed info ******************/
     display("Incorporating indexed data for training...  \n");
-    contexts = di.getContexts();
-    values = di.getValues();
+    events = di.events();
     this.cutoff = cutoff;
     predicateCounts = di.getPredCounts();
-    numTimesEventsSeen = di.getNumTimesEventsSeen();
-    numUniqueEvents = contexts.length;
     this.prior = modelPrior;
-    //printTable(contexts);
 
     // determine the correction constant and its inverse
     int correctionConstant = 1;
-    for (int ci = 0; ci < contexts.length; ci++) {
-      if (values == null || values[ci] == null) {
-        if (contexts[ci].length > correctionConstant) {
-          correctionConstant = contexts[ci].length;
+    for(ComparableEvent ev : events){
+      float[] values = ev.getValues();
+      if (values == null){
+        if (ev.getPredicateIndexes().length > correctionConstant) {
+          correctionConstant = ev.getPredicateIndexes().length;
         }
       }
       else {
-        float cl = values[ci][0];
-        for (int vi=1;vi<values[ci].length;vi++) {
-          cl+=values[ci][vi];
+        float cl = values[0];
+        for (int vi=1;vi<values.length;vi++) {
+          cl+=values[vi];
         }
         
         if (cl > correctionConstant) {
@@ -246,7 +233,6 @@ class GISTrainer {
     display("done.\n");
 
     outcomeLabels = di.getOutcomeLabels();
-    outcomeList = di.getOutcomeList();
     numOutcomes = outcomeLabels.length;
 
     predLabels = di.getPredLabels();
@@ -259,13 +245,14 @@ class GISTrainer {
 
     // set up feature arrays
     float[][] predCount = new float[numPreds][numOutcomes];
-    for (int ti = 0; ti < numUniqueEvents; ti++) {
-      for (int j = 0; j < contexts[ti].length; j++) {
-        if (values != null && values[ti] != null) {
-          predCount[contexts[ti][j]][outcomeList[ti]] += numTimesEventsSeen[ti]*values[ti][j];
+    for(ComparableEvent ev : events){
+      for (int j = 0; j < ev.getPredicateIndexes().length; j++) {
+        float[] values = ev.getValues();
+        if (values != null) {
+          predCount[ev.getPredicateIndexes()[j]][ev.getOutcome()] += ev.getSeen()*values[j];
         }
         else {          
-          predCount[contexts[ti][j]][outcomeList[ti]] += numTimesEventsSeen[ti];
+          predCount[ev.getPredicateIndexes()[j]][ev.getOutcome()] += ev.getSeen();
         }
       }
     }
@@ -336,14 +323,14 @@ class GISTrainer {
     // compute the expected value of correction
     if (useSlackParameter) {
       int cfvalSum = 0;
-      for (int ti = 0; ti < numUniqueEvents; ti++) {
-        for (int j = 0; j < contexts[ti].length; j++) {
-          int pi = contexts[ti][j];
-          if (!modelExpects[pi].contains(outcomeList[ti])) {
-            cfvalSum += numTimesEventsSeen[ti];
+      for (ComparableEvent ev : events){
+        for (int j = 0; j < ev.getPredicateIndexes().length; j++) {
+          int pi = ev.getPredicateIndexes()[j];
+          if (!modelExpects[pi].contains(ev.getOutcome())) {
+            cfvalSum += ev.getSeen();
           }
         }
-        cfvalSum += (correctionConstant - contexts[ti].length) * numTimesEventsSeen[ti];
+        cfvalSum += (correctionConstant - ev.getPredicateIndexes().length) * ev.getSeen();
       }
       if (cfvalSum == 0) {
         cfObservedExpect = Math.log(NEAR_ZERO); //nearly zero so log is defined
@@ -396,8 +383,7 @@ class GISTrainer {
     // kill a bunch of these big objects now that we don't need them
     observedExpects = null;
     modelExpects = null;
-    numTimesEventsSeen = null;
-    contexts = null;
+    events = null;
   }
   
   //modeled on implementation in  Zhang Le's maxent kit
@@ -435,42 +421,44 @@ class GISTrainer {
     CFMOD = 0.0;
     int numEvents = 0;
     int numCorrect = 0;
-    for (int ei = 0; ei < numUniqueEvents; ei++) {
+    for(ComparableEvent ev : events){
+      float[] values = ev.getValues();
+
       if (values != null) {
-        prior.logPrior(modelDistribution,contexts[ei],values[ei]);
-        GISModel.eval(contexts[ei], values[ei], modelDistribution, evalParams);
+        prior.logPrior(modelDistribution,ev.getPredicateIndexes(),values);
+        GISModel.eval(ev.getPredicateIndexes(), values, modelDistribution, evalParams);
       }
       else {
-        prior.logPrior(modelDistribution,contexts[ei]);
-        GISModel.eval(contexts[ei], modelDistribution, evalParams);
+        prior.logPrior(modelDistribution,ev.getPredicateIndexes());
+        GISModel.eval(ev.getPredicateIndexes(), modelDistribution, evalParams);
       }
-      for (int j = 0; j < contexts[ei].length; j++) {
-        int pi = contexts[ei][j];
+      for (int j = 0; j < ev.getPredicateIndexes().length; j++) {
+        int pi = ev.getPredicateIndexes()[j];
         if (predicateCounts[pi] >= cutoff) {
           int[] activeOutcomes = modelExpects[pi].getOutcomes();
           for (int aoi=0;aoi<activeOutcomes.length;aoi++) {
             int oi = activeOutcomes[aoi];
-            if (values != null && values[ei] != null) {
-              modelExpects[pi].updateParameter(aoi,modelDistribution[oi] * values[ei][j] * numTimesEventsSeen[ei]);
+            if (values != null && values != null) {
+              modelExpects[pi].updateParameter(aoi,modelDistribution[oi] * values[j] * ev.getSeen());
             }
             else {
-              modelExpects[pi].updateParameter(aoi,modelDistribution[oi] * numTimesEventsSeen[ei]);
+              modelExpects[pi].updateParameter(aoi,modelDistribution[oi] * ev.getSeen());
             }
           }
           if (useSlackParameter) {
             for (int oi = 0; oi < numOutcomes; oi++) {
               if (!modelExpects[pi].contains(oi)) {
-                CFMOD += modelDistribution[oi] * numTimesEventsSeen[ei];
+                CFMOD += modelDistribution[oi] * ev.getSeen();
               }
             }
           }
         }
       }
       if (useSlackParameter)
-        CFMOD += (evalParams.getCorrectionConstant() - contexts[ei].length) * numTimesEventsSeen[ei];
+        CFMOD += (evalParams.getCorrectionConstant() - ev.getPredicateIndexes().length) * ev.getSeen();
       
-      loglikelihood += Math.log(modelDistribution[outcomeList[ei]]) * numTimesEventsSeen[ei];
-      numEvents += numTimesEventsSeen[ei];
+      loglikelihood += Math.log(modelDistribution[ev.getOutcome()]) * ev.getSeen();
+      numEvents += ev.getSeen();
       if (printMessages) {
         int max = 0;
         for (int oi = 1; oi < numOutcomes; oi++) {
@@ -478,8 +466,8 @@ class GISTrainer {
             max = oi;
           }
         }
-        if (max == outcomeList[ei]) {
-          numCorrect += numTimesEventsSeen[ei];
+        if (max == ev.getOutcome()) {
+          numCorrect += ev.getSeen();
         }
       }
 

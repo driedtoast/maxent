@@ -17,6 +17,9 @@
 
 package opennlp.model;
 
+import java.util.Iterator;
+import java.util.Collection;
+
 /** Object which compresses events in memory and performs feature selection.
  */
 public interface DataIndexer {
@@ -25,8 +28,20 @@ public interface DataIndexer {
    * @return a 2-D array whose first dimension is the event index and array this refers to contains
    * the contexts for that event. 
    */
-  public int[][] getContexts();
+  public int[][] getContexts();  
   
+  /** 
+   * @return an iterator over observed events.
+   */
+  public Iterator<ComparableEvent> eventIterator();
+
+  public int getNumUniqueEvents();
+
+  /**
+   * @return an iterable view over observed events
+   */
+  public Collection<ComparableEvent> events();
+
   /**
    * Returns an array indicating the number of times a particular event was seen.
    * @return an array indexed by the event index indicating the number of times a particular event was seen.

@@ -18,9 +18,12 @@
 package opennlp.model;
 
 import java.util.Collections;
+import java.util.Collection;
+import java.util.AbstractCollection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Iterator;
 
 
 /**
@@ -47,6 +50,45 @@ public abstract class AbstractDataIndexer implements DataIndexer {
     return contexts;
   }
 
+  public int getNumUniqueEvents(){
+    return contexts.length;
+  }
+
+  public Iterator<ComparableEvent> eventIterator(){
+    return new Iterator<ComparableEvent>(){
+      int i = 0;
+
+      public boolean hasNext(){
+        return i < contexts.length;
+      }
+
+      public ComparableEvent next(){
+        float[][] values = getValues();
+        float[] ev = values == null ? null : values[i];
+        ComparableEvent result = new ComparableEvent(outcomeList[i], contexts[i], ev); 
+        result.seen = numTimesEventsSeen[i];
+        i++;
+        return result;
+      }
+
+      public void remove(){
+        throw new UnsupportedOperationException();
+      }
+    };
+  }
+
+  public Collection<ComparableEvent> events(){
+    return new AbstractCollection<ComparableEvent>(){
+      public Iterator<ComparableEvent> iterator(){
+        return eventIterator();
+      }
+
+      public int size(){
+        return getNumUniqueEvents();
+      }
+    };
+  }
+
   public int[] getNumTimesEventsSeen() {
     return numTimesEventsSeen;
   }
@@ -63,8 +105,6 @@ public abstract class AbstractDataIndexer implements DataIndexer {
     return outcomeLabels;
   }
   
-  
-
   public int[] getPredCounts() {
     return predCounts;
   }
